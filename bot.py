@@ -1,15 +1,16 @@
 import asyncio
 import logging
+
 from aiogram import Bot, Dispatcher
+
 from src.config import BOT_TOKEN
 from src.database.core import init_db
-
 from src.handlers import user
 
 logging.basicConfig(level=logging.INFO)
 
 
-async def main():
+async def main() -> None:
     await init_db()
 
     bot = Bot(token=BOT_TOKEN)

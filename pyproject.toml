@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "F", "E", "W", "C90", "I", "N", "UP", "YTT", "ANN", "B", "A",
+    "COM", "C4", "DTZ", "ISC", "ICN", "INP", "PIE", "PT", "RET", "SIM",
+    "TID", "ARG", "PLC", "PLE", "PLR", "PLW", "RUF",
+]
+
+ignore = [
+    "UP006", "UP007", "D407", "PLC1901", "UP035", "COM812", "E501", "ARG001","RUF001","RUF003"
+]
+unfixable = ["F401", "F841"]
+
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
