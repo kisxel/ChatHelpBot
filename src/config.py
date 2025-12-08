@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = "7977275797:AAGJee8s_tr4Vcl2zzh0ZB_aFyStpGfxpAo"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 DB_NAME = "bot.db"
 
 if not BOT_TOKEN:
