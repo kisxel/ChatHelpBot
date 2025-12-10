@@ -25,6 +25,12 @@ def get_panel_keyboard(chat: Chat) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="⚠️ Варны",
+                callback_data="panel:warns",
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="⚙️ Настройки",
                 callback_data="panel:settings",
             )

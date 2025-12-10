@@ -31,12 +31,20 @@ class Chat(Base):
 
 
 class Warn(Base):
+    """Варны пользователей."""
+
     __tablename__ = "warns"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger)
-    chat_id: Mapped[int] = mapped_column(BigInteger)
-    count: Mapped[int] = mapped_column(Integer, default=1)
-    reason: Mapped[str] = mapped_column(String, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, index=True, nullable=True
+    )
+    username: Mapped[str | None] = mapped_column(
+        String, index=True, nullable=True
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    warned_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
+    warned_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class ChatSettings(Base):
