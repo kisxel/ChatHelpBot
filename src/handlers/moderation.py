@@ -1,5 +1,6 @@
 """Обработчики команд модерации: бан, мут, кик."""
 
+import contextlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -9,7 +10,10 @@ from aiogram import Bot, F, Router, types
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import select
 
+from src.database.core import async_session
+from src.database.models import Chat, MessageStats, UserFilter
 from src.utils import format_timedelta, parse_timedelta
 
 router = Router()
@@ -17,12 +21,48 @@ router = Router()
 MIN_MUTE_SECONDS = 30
 
 # Анти-спам: хранение сообщений пользователей
-# Формат: {(chat_id, user_id): [timestamp1, timestamp2, ...]}
-user_messages: dict[tuple[int, int], list[datetime]] = defaultdict(list)
+# Формат: {(chat_id, user_id): [(timestamp, message_id), ...]}
+user_messages: dict[tuple[int, int], list[tuple[datetime, int]]] = defaultdict(
+    list
+)
+
+# Максимальный размер кэша username
+MAX_USERNAME_CACHE_SIZE = 10000
+
+
+class LRUUsernameCache(dict):
+    """LRU кэш для username с ограничением размера."""
+
+    def __init__(self, maxsize: int = MAX_USERNAME_CACHE_SIZE) -> None:
+        super().__init__()
+        self.maxsize = maxsize
+        self._order: list = []
+
+    def __setitem__(self, key: tuple, value: tuple) -> None:
+        if key in self:
+            self._order.remove(key)
+        super().__setitem__(key, value)
+        self._order.append(key)
+        # Удаляем самые старые записи если превышен лимит
+        while len(self) > self.maxsize:
+            oldest = self._order.pop(0)
+            super().__delitem__(oldest)
+
+    def __getitem__(self, key: tuple) -> tuple:
+        # Перемещаем в конец при доступе (LRU)
+        if key in self._order:
+            self._order.remove(key)
+            self._order.append(key)
+        return super().__getitem__(key)
+
+
+# Кэш username -> (user_id, full_name) для каждого чата
+# Формат: {(chat_id, username_lower): (user_id, full_name)}
+username_cache: LRUUsernameCache = LRUUsernameCache()
 
 # Настройки анти-спама
-SPAM_MAX_MESSAGES = 10  # Максимум сообщений
-SPAM_TIME_WINDOW = 10  # За последние N секунд
+SPAM_MAX_MESSAGES = 4  # Максимум сообщений
+SPAM_TIME_WINDOW = 3  # За последние N секунд
 SPAM_MUTE_DURATION = timedelta(minutes=5)  # Мут за спам
 
 # Регулярные выражения для команд без слэша (русский язык)
@@ -30,6 +70,31 @@ SPAM_MUTE_DURATION = timedelta(minutes=5)  # Мут за спам
 TEXT_CMD_PATTERN = re.compile(
     r"^(мут|бан|размут|разбан|кик)(?:\s+(.*))?$", re.IGNORECASE
 )
+
+# Паттерн для команд репорта (с опциональным текстом)
+REPORT_CMD_PATTERN = re.compile(
+    r"^[!/](admin|админ|report|репорт)(?:\s+(.*))?$", re.IGNORECASE
+)
+
+
+def cache_user(chat_id: int, user: types.User) -> None:
+    """Кэширует username пользователя для последующего поиска."""
+    if user.username:
+        key = (chat_id, user.username.lower())
+        username_cache[key] = (user.id, user.full_name)
+
+
+def get_cached_user(
+    chat_id: int, username: str
+) -> tuple[int | None, str | None]:
+    """Получает user_id из кэша по username."""
+    # Убираем @ если есть
+    clean_username = username.lstrip("@").lower()
+    key = (chat_id, clean_username)
+    if key in username_cache:
+        user_id, full_name = username_cache[key]
+        return user_id, full_name
+    return None, None
 
 
 @dataclass
@@ -592,28 +657,53 @@ async def _build_moderation_context(
         return None
 
     # Пробуем получить пользователя
-    user_id = None
-    user_name = None
-
-    if user_arg.isdigit():
-        user_id = int(user_arg)
-        user_name = f"ID:{user_arg}"
-    elif user_arg.startswith("@"):
-        # Пробуем получить по username
-        try:
-            chat = await bot.get_chat(user_arg)
-            if chat.id:
-                user_id = chat.id
-                user_name = chat.full_name or chat.username or user_arg
-        except Exception:
-            return None
-    else:
-        return None
-
+    user_id, user_name = await _resolve_user_arg(user_arg, message, bot)
     if not user_id:
         return None
 
     return ModerationContext(user_id, user_name, duration, reason)
+
+
+async def _resolve_user_arg(
+    user_arg: str, message: types.Message, bot: Bot
+) -> tuple[int | None, str | None]:
+    """Разрешает аргумент пользователя в user_id и имя."""
+    # Если это число - ID
+    if user_arg.isdigit():
+        return int(user_arg), f"ID:{user_arg}"
+
+    # Если @username - ищем в кэше, entities или через API
+    if user_arg.startswith("@"):
+        chat_id = message.chat.id
+
+        # 1. Сначала проверяем кэш
+        cached_id, cached_name = get_cached_user(chat_id, user_arg)
+        if cached_id:
+            return cached_id, cached_name
+
+        # 2. Ищем в text_mention entities (если пользователь упомянут через @)
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention" and entity.user:
+                    return entity.user.id, entity.user.full_name
+
+        # 3. Пробуем через get_chat API
+        try:
+            chat = await bot.get_chat(user_arg)
+            if chat.id:
+                name = chat.full_name or chat.username or user_arg
+                # Кэшируем для будущего использования
+                username_cache[(chat_id, user_arg.lstrip("@").lower())] = (
+                    chat.id,
+                    name,
+                )
+                return chat.id, name
+        except Exception:
+            pass
+
+        return None, None
+
+    return None, None
 
 
 async def _send_usage_hint(message: types.Message, command: str) -> None:
@@ -867,6 +957,89 @@ async def callback_unmute(callback: types.CallbackQuery, bot: Bot) -> None:
         await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
 
 
+# ==================== РЕПОРТ АДМИНИСТРАТОРУ ====================
+
+
+async def _get_chat_owner_id(chat_id: int) -> int | None:
+    """Получает ID владельца чата (кто активировал бота)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        chat = result.scalar_one_or_none()
+        if chat:
+            return chat.activated_by
+    return None
+
+
+@router.message(F.text.regexp(REPORT_CMD_PATTERN))
+async def report_command(message: types.Message, bot: Bot) -> None:
+    """Обработчик команд репорта: !admin, !админ, !report, !репорт."""
+    if message.chat.type == ChatType.PRIVATE or not message.from_user:
+        return
+
+    chat_id = message.chat.id
+    chat_title = message.chat.title or "Без названия"
+
+    # Получаем ID администратора (владельца)
+    owner_id = await _get_chat_owner_id(chat_id)
+    if not owner_id:
+        await message.answer("❌ Бот не активирован в этом чате.")
+        return
+
+    reporter = message.from_user.full_name
+
+    # Извлекаем текст сообщения после команды
+    match = REPORT_CMD_PATTERN.match(message.text)
+    report_text = match.group(2) if match and match.group(2) else None
+
+    try:
+        if message.reply_to_message:
+            # Есть ответ на сообщение - пересылаем его
+            reported_msg = message.reply_to_message
+            reported_user = (
+                reported_msg.from_user.full_name
+                if reported_msg.from_user
+                else "Неизвестно"
+            )
+
+            # Формируем текст уведомления
+            notification = (
+                f"🚨 <b>Новый репорт</b>\n\n"
+                f"📍 Чат: {chat_title}\n"
+                f"👤 Отправил: {reporter}\n"
+                f"⚠️ На пользователя: {reported_user}"
+            )
+            if report_text:
+                notification += f"\n💬 Комментарий: {report_text}"
+            notification += "\n\nСообщение ниже:"
+
+            await bot.send_message(owner_id, notification, parse_mode="HTML")
+
+            # Пересылаем сообщение
+            await reported_msg.forward(owner_id)
+        else:
+            # Нет ответа - просто уведомляем
+            notification = (
+                f"🚨 <b>Новый репорт</b>\n\n"
+                f"📍 Чат: {chat_title}\n"
+                f"👤 Отправил: {reporter}"
+            )
+            if report_text:
+                notification += f"\n💬 Сообщение: {report_text}"
+            else:
+                notification += "\n\n<i>Репорт без указания сообщения</i>"
+
+            await bot.send_message(owner_id, notification, parse_mode="HTML")
+
+        await message.answer("✅ Репорт отправлен администратору.")
+    except Exception:
+        await message.answer(
+            "❌ Не удалось отправить репорт. "
+            "Возможно, администратор заблокировал бота."
+        )
+
+
 # ==================== АНТИ-СПАМ ====================
 
 
@@ -877,19 +1050,31 @@ def _clean_old_messages(chat_id: int, user_id: int) -> None:
         return
 
     cutoff = datetime.now(UTC) - timedelta(seconds=SPAM_TIME_WINDOW)
-    user_messages[key] = [ts for ts in user_messages[key] if ts > cutoff]
+    user_messages[key] = [
+        (ts, msg_id) for ts, msg_id in user_messages[key] if ts > cutoff
+    ]
 
 
-def _is_spam(chat_id: int, user_id: int) -> bool:
-    """Проверяет, является ли активность пользователя спамом."""
+def _check_and_get_spam_messages(
+    chat_id: int, user_id: int, message_id: int
+) -> list[int] | None:
+    """
+    Проверяет на спам и возвращает список message_id для удаления.
+
+    Возвращает None если не спам, иначе список ID сообщений.
+    """
     key = (chat_id, user_id)
     _clean_old_messages(chat_id, user_id)
 
     # Добавляем текущее сообщение
-    user_messages[key].append(datetime.now(UTC))
+    user_messages[key].append((datetime.now(UTC), message_id))
 
     # Проверяем количество сообщений
-    return len(user_messages[key]) > SPAM_MAX_MESSAGES
+    if len(user_messages[key]) > SPAM_MAX_MESSAGES:
+        # Собираем все message_id для удаления
+        return [msg_id for _, msg_id in user_messages[key]]
+
+    return None
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
@@ -901,6 +1086,9 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
     chat_id = message.chat.id
     user_id = message.from_user.id
 
+    # Кэшируем пользователя для поиска по @username
+    cache_user(chat_id, message.from_user)
+
     # Пропускаем администраторов
     if await is_user_admin(chat_id, user_id, bot):
         return
@@ -910,7 +1098,10 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
         return
 
     # Проверяем на спам
-    if _is_spam(chat_id, user_id):
+    spam_msg_ids = _check_and_get_spam_messages(
+        chat_id, user_id, message.message_id
+    )
+    if spam_msg_ids:
         try:
             # Мутим пользователя
             until_date = datetime.now(UTC) + SPAM_MUTE_DURATION
@@ -920,6 +1111,11 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
                 permissions=get_mute_permissions(),
                 until_date=until_date,
             )
+
+            # Удаляем спам-сообщения
+            for msg_id in spam_msg_ids:
+                with contextlib.suppress(Exception):
+                    await bot.delete_message(chat_id, msg_id)
 
             # Очищаем счётчик
             user_messages[(chat_id, user_id)] = []
@@ -933,3 +1129,145 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
             )
         except Exception:
             pass  # Игнорируем ошибки анти-спама
+
+    # Обновляем статистику сообщений
+    await _update_message_stats(chat_id)
+
+    # Проверяем фильтры пользователя
+    await _check_user_filters(message, bot)
+
+
+# ==================== СТАТИСТИКА И ФИЛЬТРЫ ====================
+
+
+async def _update_message_stats(chat_id: int) -> None:
+    """Обновляет статистику сообщений за сегодня."""
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(MessageStats).where(
+                MessageStats.chat_id == chat_id, MessageStats.date == today
+            )
+        )
+        stats = result.scalar_one_or_none()
+
+        if stats:
+            stats.message_count += 1
+        else:
+            stats = MessageStats(chat_id=chat_id, date=today, message_count=1)
+            session.add(stats)
+
+        await session.commit()
+
+
+async def _check_user_filters(message: types.Message, bot: Bot) -> None:
+    """Проверяет сообщение на соответствие фильтрам пользователя."""
+    if not message.from_user or not message.text:
+        return
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserFilter).where(
+                UserFilter.chat_id == chat_id,
+                UserFilter.user_id == user_id,
+                UserFilter.is_active,
+            )
+        )
+        filters = list(result.scalars().all())
+
+    if not filters:
+        return
+
+    text_lower = message.text.lower()
+
+    for f in filters:
+        patterns = [p.strip().lower() for p in f.pattern.split(",")]
+
+        if f.filter_type == "block":
+            # Удалять если содержит паттерн
+            for pattern in patterns:
+                if pattern and pattern in text_lower:
+                    with contextlib.suppress(Exception):
+                        await bot.delete_message(chat_id, message.message_id)
+                    return
+        elif f.filter_type == "allow":
+            # Удалять если НЕ содержит паттерн
+            contains_allowed = any(p and p in text_lower for p in patterns)
+            if not contains_allowed:
+                with contextlib.suppress(Exception):
+                    await bot.delete_message(chat_id, message.message_id)
+                return
+
+
+# ==================== КОМАНДА /re ====================
+
+
+@router.message(Command("re"))
+async def cmd_re(message: types.Message, bot: Bot) -> None:
+    """Команда проверки статуса бота (только для админов)."""
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer(
+            "❌ Эта команда работает только в групповых чатах."
+        )
+        return
+
+    chat_id = message.chat.id
+
+    # Проверяем права администратора
+    if not await is_user_admin(chat_id, message.from_user.id, bot):
+        await message.answer(
+            "❌ Только администраторы могут использовать эту команду."
+        )
+        return
+
+    # Проверяем права бота
+    can_restrict = await can_bot_restrict(chat_id, bot)
+    can_delete = await _can_bot_delete(chat_id, bot)
+
+    # Получаем информацию о чате из БД
+    chat = await _get_chat_from_db(chat_id)
+
+    status_lines = ["🤖 <b>Статус бота</b>\n"]
+
+    if chat and chat.is_active:
+        status_lines.append("✅ Бот активирован")
+    else:
+        status_lines.append("⚠️ Бот не активирован (/setup)")
+
+    if can_restrict:
+        status_lines.append("✅ Может ограничивать пользователей")
+    else:
+        status_lines.append("❌ Нет прав на ограничение")
+
+    if can_delete:
+        status_lines.append("✅ Может удалять сообщения")
+    else:
+        status_lines.append("❌ Нет прав на удаление сообщений")
+
+    status_lines.append("\n💚 <b>Бот работает нормально!</b>")
+
+    await message.answer("\n".join(status_lines), parse_mode="HTML")
+
+
+async def _can_bot_delete(chat_id: int, bot: Bot) -> bool:
+    """Проверяет, может ли бот удалять сообщения."""
+    try:
+        bot_member = await bot.get_chat_member(chat_id, bot.id)
+        if isinstance(bot_member, types.ChatMemberAdministrator):
+            return bot_member.can_delete_messages
+        return False
+    except Exception:
+        return False
+
+
+async def _get_chat_from_db(chat_id: int) -> Chat | None:
+    """Получает чат из базы данных."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        return result.scalar_one_or_none()

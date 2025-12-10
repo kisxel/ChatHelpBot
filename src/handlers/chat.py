@@ -41,6 +41,13 @@ async def get_chat_from_db(chat_id: int) -> Chat | None:
         return result.scalar_one_or_none()
 
 
+async def has_active_chat() -> bool:
+    """Проверяет, есть ли уже активный чат."""
+    async with async_session() as session:
+        result = await session.execute(select(Chat).where(Chat.is_active))
+        return result.scalar_one_or_none() is not None
+
+
 async def activate_chat(
     chat_id: int, title: str | None, activated_by: int
 ) -> Chat:
@@ -50,6 +57,7 @@ async def activate_chat(
         if chat:
             chat.is_active = True
             chat.title = title
+            chat.activated_by = activated_by
             session.add(chat)
         else:
             chat = Chat(
@@ -77,12 +85,20 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # Проверяем, не активирован ли уже бот
+    # Проверяем, не активирован ли уже бот в этом чате
     existing_chat = await get_chat_from_db(chat_id)
     if existing_chat and existing_chat.is_active:
         await message.answer(
             "✅ Бот уже активирован в этом чате!\n"
             "Используйте /help для списка команд."
+        )
+        return
+
+    # Проверяем, не активирован ли бот в другом чате
+    if await has_active_chat():
+        await message.answer(
+            "❌ Бот уже активирован в другом чате.\n"
+            "Сначала деактивируйте его там через /panel в ЛС с ботом."
         )
         return
 

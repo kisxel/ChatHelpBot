@@ -1,4 +1,12 @@
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database.core import Base
@@ -15,6 +23,7 @@ class Chat(Base):
     activated_at: Mapped[str] = mapped_column(
         DateTime, server_default=func.now()
     )
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Warn(Base):
@@ -30,3 +39,27 @@ class ChatSettings(Base):
     __tablename__ = "chat_settings"
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     banned_words: Mapped[str] = mapped_column(String, default="")
+
+
+class UserFilter(Base):
+    """Фильтры сообщений для конкретного пользователя в чате."""
+
+    __tablename__ = "user_filters"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    # Тип фильтра: 'block' - удалять содержащие, 'allow' - удалять НЕ содержащие
+    filter_type: Mapped[str] = mapped_column(String, default="block")
+    # Паттерн для фильтрации (через запятую если несколько)
+    pattern: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class MessageStats(Base):
+    """Статистика сообщений в чате по дням."""
+
+    __tablename__ = "message_stats"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    date: Mapped[str] = mapped_column(String)  # Формат: YYYY-MM-DD
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
