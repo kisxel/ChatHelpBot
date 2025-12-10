@@ -1,3 +1,5 @@
+"""Команды пользователя: /start, /help, /about."""
+
 from aiogram import Bot, Router, types
 from aiogram.enums import ChatType
 from aiogram.filters import Command
@@ -7,7 +9,7 @@ from sqlalchemy import select
 from src.database.core import async_session
 from src.database.models import Chat
 
-router = Router()
+router = Router(name="user")
 
 
 async def get_chat_from_db(chat_id: int) -> Chat | None:
@@ -21,6 +23,7 @@ async def get_chat_from_db(chat_id: int) -> Chat | None:
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message, bot: Bot) -> None:
+    """Команда /start - приветствие."""
     # В групповом чате проверяем активацию
     if message.chat.type != ChatType.PRIVATE:
         chat = await get_chat_from_db(message.chat.id)
@@ -58,6 +61,7 @@ async def cmd_start(message: types.Message, bot: Bot) -> None:
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message) -> None:
+    """Команда /help - список команд."""
     await message.answer(
         "📖 <b>Список команд:</b>\n\n"
         "<b>Основные:</b>\n"
@@ -86,7 +90,16 @@ async def cmd_help(message: types.Message) -> None:
 
 @router.message(Command("about"))
 async def cmd_about(message: types.Message) -> None:
+    """Команда /about - информация о боте."""
     await message.answer(
-        "ℹ️ <b>О боте</b>\n\n<i>Soon...</i>",
+        "ℹ️ <b>О боте</b>\n\n"
+        "🤖 <b>ChatHelpBot</b> - бот для модерации чатов\n\n"
+        "📌 <b>Возможности:</b>\n"
+        "• Бан/мут/кик пользователей\n"
+        "• Автоматическая защита от спама\n"
+        "• Фильтрация сообщений\n"
+        "• Репорты администратору\n"
+        "• Панель управления\n\n"
+        "👨‍💻 Курсовой проект ГУАП",
         parse_mode="HTML",
     )

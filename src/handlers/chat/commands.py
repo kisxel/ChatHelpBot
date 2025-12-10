@@ -1,57 +1,20 @@
-"""Обработчики для управления чатами."""
+"""Команды управления чатом: /setup, /check."""
 
 from aiogram import Bot, Router, types
-from aiogram.enums import ChatMemberStatus, ChatType
+from aiogram.enums import ChatType
 from aiogram.filters import Command
 from sqlalchemy import select
 
+from src.common.permissions import (
+    can_bot_delete,
+    can_bot_restrict,
+    is_bot_admin,
+    is_user_admin,
+)
 from src.database.core import async_session
 from src.database.models import Chat
 
-router = Router()
-
-
-async def is_user_admin(chat_id: int, user_id: int, bot: Bot) -> bool:
-    """Проверяет, является ли пользователь администратором чата."""
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-        return member.status in (
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.CREATOR,
-        )
-    except Exception:
-        return False
-
-
-async def is_bot_admin(chat_id: int, bot: Bot) -> bool:
-    """Проверяет, является ли бот администратором чата."""
-    try:
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
-        return bot_member.status == ChatMemberStatus.ADMINISTRATOR
-    except Exception:
-        return False
-
-
-async def can_bot_restrict(chat_id: int, bot: Bot) -> bool:
-    """Проверяет, может ли бот ограничивать пользователей."""
-    try:
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
-        if isinstance(bot_member, types.ChatMemberAdministrator):
-            return bot_member.can_restrict_members
-        return False
-    except Exception:
-        return False
-
-
-async def can_bot_delete(chat_id: int, bot: Bot) -> bool:
-    """Проверяет, может ли бот удалять сообщения."""
-    try:
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
-        if isinstance(bot_member, types.ChatMemberAdministrator):
-            return bot_member.can_delete_messages
-        return False
-    except Exception:
-        return False
+router = Router(name="chat")
 
 
 async def get_chat_from_db(chat_id: int) -> Chat | None:
@@ -95,8 +58,7 @@ async def activate_chat(
 
 @router.message(Command("setup"))
 async def cmd_setup(message: types.Message, bot: Bot) -> None:
-    """Команда для активации бота в чате."""
-    # Проверяем, что команда вызвана в группе
+    """Команда /setup - активация бота в чате."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах.\n"
@@ -142,13 +104,12 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
 
     # Активируем чат в базе данных
     await activate_chat(chat_id, message.chat.title, user_id)
-
     await message.answer("✅ Бот успешно активирован в этом чате!")
 
 
 @router.message(Command("check"))
 async def cmd_check(message: types.Message, bot: Bot) -> None:
-    """Команда проверки состояния бота (для всех пользователей)."""
+    """Команда /check - проверка состояния бота."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах."
@@ -158,11 +119,8 @@ async def cmd_check(message: types.Message, bot: Bot) -> None:
     chat_id = message.chat.id
 
     try:
-        # Проверяем права бота
         bot_can_restrict = await can_bot_restrict(chat_id, bot)
         bot_can_delete = await can_bot_delete(chat_id, bot)
-
-        # Получаем информацию о чате из БД
         chat = await get_chat_from_db(chat_id)
 
         if chat and chat.is_active and bot_can_restrict and bot_can_delete:
