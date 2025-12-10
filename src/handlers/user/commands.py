@@ -102,8 +102,22 @@ async def cmd_about(message: types.Message) -> None:
         "• Бан/мут/кик пользователей\n"
         "• Автоматическая защита от спама\n"
         "• Фильтрация сообщений\n"
+        "• Система варнов\n"
         "• Репорты администратору\n"
-        "• Панель управления\n\n"
-        "👨‍💻 Курсовой проект ГУАП",
+        "• Панель управления",
         parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="👤 Алексей",
+                        url="https://t.me/lexsik",
+                    ),
+                    InlineKeyboardButton(
+                        text="💻 GitHub",
+                        url="https://github.com/kisxel/ChatHelpBot",
+                    ),
+                ]
+            ]
+        ),
     )

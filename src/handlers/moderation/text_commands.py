@@ -21,9 +21,11 @@ from src.utils import parse_timedelta
 
 router = Router(name="text_commands")
 
-# Регулярное выражение для команд без слэша
+# Регулярное выражение для команд модерации (в начале строки)
+# Поддержка: мут, !мут, mute, !mute, анмут, unmute, бан, ban, кик, kick и т.д.
 TEXT_CMD_PATTERN = re.compile(
-    r"^(мут|бан|размут|разбан|кик)(?:\s+(.*))?$", re.IGNORECASE
+    r"^!?(мут|mute|размут|анмут|unmute|бан|ban|разбан|анбан|unban|кик|kick)(?:\s+(.*))?$",
+    re.IGNORECASE,
 )
 
 # Максимальный размер кэша username
@@ -186,10 +188,17 @@ def get_action_verb(command: str) -> str:
     """Возвращает глагол действия для сообщений об ошибках."""
     verbs = {
         "мут": "замутить",
+        "mute": "замутить",
         "бан": "забанить",
+        "ban": "забанить",
         "размут": "размутить",
+        "анмут": "размутить",
+        "unmute": "размутить",
         "разбан": "разбанить",
+        "анбан": "разбанить",
+        "unban": "разбанить",
         "кик": "кикнуть",
+        "kick": "кикнуть",
     }
     return verbs.get(command, "модерировать")
 
@@ -231,13 +240,20 @@ async def text_moderation_command(message: types.Message, bot: Bot) -> None:
     ctx = await build_moderation_context(message, args_text, bot)
     if not ctx:
         cmd_examples = {
-            "мут": "мут 1м ругался в чате",
-            "бан": "бан 1д спам",
-            "размут": "размут",
-            "разбан": "разбан",
-            "кик": "кик нарушение правил",
+            "мут": "мут @user 1м причина",
+            "mute": "mute @user 1m reason",
+            "бан": "бан @user 1д причина",
+            "ban": "ban @user 1d reason",
+            "размут": "размут @user",
+            "анмут": "анмут @user",
+            "unmute": "unmute @user",
+            "разбан": "разбан @user",
+            "анбан": "анбан @user",
+            "unban": "unban @user",
+            "кик": "кик @user причина",
+            "kick": "kick @user reason",
         }
-        example = cmd_examples.get(command, "мут 1м причина")
+        example = cmd_examples.get(command, "мут @user 1м причина")
         await message.answer(
             f"❌ Укажите пользователя.\nОтветьте на сообщение или: {example}"
         )
@@ -251,13 +267,25 @@ async def text_moderation_command(message: types.Message, bot: Bot) -> None:
         await message.answer(error)
         return
 
-    # Выполняем команду
+    # Маппинг команд на обработчики
     handlers = {
+        # Мут
         "мут": execute_mute,
-        "бан": execute_ban,
+        "mute": execute_mute,
+        # Размут
         "размут": execute_unmute,
+        "анмут": execute_unmute,
+        "unmute": execute_unmute,
+        # Бан
+        "бан": execute_ban,
+        "ban": execute_ban,
+        # Разбан
         "разбан": execute_unban,
+        "анбан": execute_unban,
+        "unban": execute_unban,
+        # Кик
         "кик": execute_kick,
+        "kick": execute_kick,
     }
     handler = handlers.get(command)
     if handler:
