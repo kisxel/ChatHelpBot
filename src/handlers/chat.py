@@ -77,6 +77,15 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
 
+    # Проверяем, не активирован ли уже бот
+    existing_chat = await get_chat_from_db(chat_id)
+    if existing_chat and existing_chat.is_active:
+        await message.answer(
+            "✅ Бот уже активирован в этом чате!\n"
+            "Используйте /help для списка команд."
+        )
+        return
+
     # Проверяем, является ли пользователь администратором
     if not await is_user_admin(chat_id, user_id, bot):
         await message.answer(

@@ -4,7 +4,8 @@ import re
 from datetime import timedelta
 
 # Паттерн для парсинга времени: 1d2h30m, 5m, 1w и т.д.
-TIME_PATTERN = re.compile(r"(?P<value>\d+)(?P<modifier>[wdhms])")
+# Поддержка английских (w, d, h, m, s) и русских (н, д, ч, м, с) модификаторов
+TIME_PATTERN = re.compile(r"(?P<value>\d+)(?P<modifier>[wdhmsндчмс])")
 
 # Множители для конвертации в секунды
 SECONDS_IN_MINUTE = 60
@@ -13,11 +14,18 @@ SECONDS_IN_DAY = 86400
 SECONDS_IN_WEEK = 604800
 
 TIME_MULTIPLIERS = {
+    # Английские модификаторы
     "w": SECONDS_IN_WEEK,
     "d": SECONDS_IN_DAY,
     "h": SECONDS_IN_HOUR,
     "m": SECONDS_IN_MINUTE,
     "s": 1,
+    # Русские модификаторы
+    "н": SECONDS_IN_WEEK,  # неделя
+    "д": SECONDS_IN_DAY,  # день
+    "ч": SECONDS_IN_HOUR,  # час
+    "м": SECONDS_IN_MINUTE,  # минута
+    "с": 1,  # секунда
 }
 
 
@@ -25,13 +33,21 @@ def parse_timedelta(time_str: str) -> timedelta | None:
     """
     Парсит строку времени в timedelta.
 
-    Поддерживаемые форматы:
+    Поддерживаемые форматы (английские):
     - 30s — 30 секунд
     - 5m — 5 минут
     - 2h — 2 часа
     - 1d — 1 день
     - 1w — 1 неделя
     - 1d12h30m — комбинации
+
+    Поддерживаемые форматы (русские):
+    - 30с — 30 секунд
+    - 5м — 5 минут
+    - 2ч — 2 часа
+    - 1д — 1 день
+    - 1н — 1 неделя
+    - 1д12ч30м — комбинации
 
     Возвращает None если формат неверный.
     """

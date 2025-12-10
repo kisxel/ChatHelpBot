@@ -1,11 +1,41 @@
-from aiogram import Router, types
+from aiogram import Bot, Router, types
+from aiogram.enums import ChatType
 from aiogram.filters import Command
+from sqlalchemy import select
+
+from src.database.core import async_session
+from src.database.models import Chat
 
 router = Router()
 
 
+async def get_chat_from_db(chat_id: int) -> Chat | None:
+    """Получает информацию о чате из базы данных."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        return result.scalar_one_or_none()
+
+
 @router.message(Command("start"))
-async def cmd_start(message: types.Message) -> None:
+async def cmd_start(message: types.Message, bot: Bot) -> None:
+    # В групповом чате проверяем активацию
+    if message.chat.type != ChatType.PRIVATE:
+        chat = await get_chat_from_db(message.chat.id)
+        if chat and chat.is_active:
+            await message.answer(
+                "✅ Бот уже активирован в этом чате!\n"
+                "Используйте /help для списка команд."
+            )
+        else:
+            await message.answer(
+                "⚠️ Бот не активирован в этом чате.\n"
+                "Администратор может активировать его командой /setup"
+            )
+        return
+
+    # В личных сообщениях показываем приветствие
     await message.answer(
         "👋 Привет! Я бот-модератор.\n\n"
         "Я помогаю следить за порядком в чатах.\n\n"
@@ -29,14 +59,14 @@ async def cmd_help(message: types.Message) -> None:
         "/setup - активировать бота в чате\n"
         "/status - проверить статус бота\n\n"
         "<b>Модерация:</b>\n"
-        "/ban [время] [причина] - забанить\n"
-        "/unban - разбанить\n"
-        "/mute [время] [причина] - замутить\n"
-        "/unmute - снять мут\n"
-        "/kick [причина] - кикнуть\n\n"
+        "/ban [время] [причина] - забанить (или: бан)\n"
+        "/unban - разбанить (или: разбан)\n"
+        "/mute [время] [причина] - замутить (или: мут)\n"
+        "/unmute - снять мут (или: размут)\n"
+        "/kick [причина] - кикнуть (или: кик)\n\n"
         "<b>Формат времени:</b>\n"
-        "30s - секунды, 5m - минуты\n"
-        "2h - часы, 1d - дни, 1w - недели\n"
-        "Пример: 1d12h30m",
+        "Англ: 30s, 5m, 2h, 1d, 1w\n"
+        "Рус: 30с, 5м, 2ч, 1д, 1н\n"
+        "Пример: 1d12h30m или 1д12ч30м",
         parse_mode="HTML",
     )
