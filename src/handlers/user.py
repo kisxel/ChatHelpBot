@@ -1,6 +1,7 @@
 from aiogram import Bot, Router, types
 from aiogram.enums import ChatType
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 
 from src.database.core import async_session
@@ -24,10 +25,7 @@ async def cmd_start(message: types.Message, bot: Bot) -> None:
     if message.chat.type != ChatType.PRIVATE:
         chat = await get_chat_from_db(message.chat.id)
         if chat and chat.is_active:
-            await message.answer(
-                "✅ Бот уже активирован в этом чате!\n"
-                "Используйте /help для списка команд."
-            )
+            await message.answer("✅ Бот уже активирован в этом чате!")
         else:
             await message.answer(
                 "⚠️ Бот не активирован в этом чате.\n"
@@ -45,6 +43,16 @@ async def cmd_start(message: types.Message, bot: Bot) -> None:
         "3. Выполните команду /setup\n\n"
         "💡 Используйте /help для списка команд",
         parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🎛 Панель управления",
+                        callback_data="open_panel",
+                    )
+                ]
+            ]
+        ),
     )
 
 
@@ -57,8 +65,7 @@ async def cmd_help(message: types.Message) -> None:
         "/help - показать это сообщение\n\n"
         "<b>Настройка:</b>\n"
         "/setup - активировать бота в чате\n"
-        "/status - проверить статус бота\n"
-        "/re - проверка работы бота (для админов)\n\n"
+        "/check - проверить состояние бота (в чате)\n\n"
         "<b>Панель управления:</b>\n"
         "/panel - панель управления (в ЛС с ботом)\n\n"
         "<b>Модерация:</b>\n"

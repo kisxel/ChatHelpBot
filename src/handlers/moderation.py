@@ -26,6 +26,16 @@ user_messages: dict[tuple[int, int], list[tuple[datetime, int]]] = defaultdict(
     list
 )
 
+# Трекинг последних спам-мутов для предотвращения дублирования
+# Формат: {(chat_id, user_id): timestamp_последнего_мута}
+recent_spam_mutes: dict[tuple[int, int], datetime] = {}
+
+# Интервал между сообщениями о муте за спам (секунды)
+SPAM_MUTE_COOLDOWN_SECONDS = 10
+
+# Максимальная длина сообщения в уведомлении о фильтре
+MAX_FILTER_NOTIFICATION_LENGTH = 200
+
 # Максимальный размер кэша username
 MAX_USERNAME_CACHE_SIZE = 10000
 
@@ -238,6 +248,30 @@ def get_unmute_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
+async def are_moderation_cmds_enabled(chat_id: int) -> bool:
+    """Проверяет, включены ли команды модерации для чата."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        chat = result.scalar_one_or_none()
+        if chat:
+            return chat.enable_moderation_cmds
+        return True  # По умолчанию включены
+
+
+async def are_report_cmds_enabled(chat_id: int) -> bool:
+    """Проверяет, включены ли команды репортов для чата."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        chat = result.scalar_one_or_none()
+        if chat:
+            return chat.enable_report_cmds
+        return True  # По умолчанию включены
+
+
 async def check_admin_permissions(
     message: types.Message,
     bot: Bot,
@@ -281,6 +315,9 @@ async def check_target_user(
 @router.message(Command("ban"))
 async def cmd_ban(message: types.Message, bot: Bot) -> None:
     """Бан пользователя: /ban [время] [причина]."""
+    if not await are_moderation_cmds_enabled(message.chat.id):
+        return
+
     error = await check_admin_permissions(
         message, bot, "❌ У меня нет прав на блокировку пользователей."
     )
@@ -327,6 +364,9 @@ async def cmd_ban(message: types.Message, bot: Bot) -> None:
 @router.message(Command("unban"))
 async def cmd_unban(message: types.Message, bot: Bot) -> None:
     """Разбан пользователя: /unban."""
+    if not await are_moderation_cmds_enabled(message.chat.id):
+        return
+
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах."
@@ -402,6 +442,9 @@ def get_unmute_permissions() -> types.ChatPermissions:
 @router.message(Command("mute"))
 async def cmd_mute(message: types.Message, bot: Bot) -> None:
     """Мут пользователя: /mute [время] [причина]."""
+    if not await are_moderation_cmds_enabled(message.chat.id):
+        return
+
     error = await check_admin_permissions(
         message, bot, "❌ У меня нет прав на ограничение пользователей."
     )
@@ -458,6 +501,9 @@ async def cmd_mute(message: types.Message, bot: Bot) -> None:
 @router.message(Command("unmute"))
 async def cmd_unmute(message: types.Message, bot: Bot) -> None:
     """Снятие мута: /unmute."""
+    if not await are_moderation_cmds_enabled(message.chat.id):
+        return
+
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах."
@@ -503,6 +549,9 @@ async def cmd_unmute(message: types.Message, bot: Bot) -> None:
 @router.message(Command("kick"))
 async def cmd_kick(message: types.Message, bot: Bot) -> None:
     """Кик пользователя: /kick [причина]."""
+    if not await are_moderation_cmds_enabled(message.chat.id):
+        return
+
     error = await check_admin_permissions(
         message, bot, "❌ У меня нет прав на кик пользователей."
     )
@@ -594,6 +643,10 @@ def parse_text_command_args(
 async def text_moderation_command(message: types.Message, bot: Bot) -> None:
     """Обработчик текстовых команд модерации без слэша."""
     if message.chat.type == ChatType.PRIVATE or not message.text:
+        return
+
+    # Проверяем настройки
+    if not await are_moderation_cmds_enabled(message.chat.id):
         return
 
     match = TEXT_CMD_PATTERN.match(message.text)
@@ -978,6 +1031,10 @@ async def report_command(message: types.Message, bot: Bot) -> None:
     if message.chat.type == ChatType.PRIVATE or not message.from_user:
         return
 
+    # Проверяем настройки
+    if not await are_report_cmds_enabled(message.chat.id):
+        return
+
     chat_id = message.chat.id
     chat_title = message.chat.title or "Без названия"
 
@@ -1102,15 +1159,32 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
         chat_id, user_id, message.message_id
     )
     if spam_msg_ids:
+        # Проверяем, не мутили ли мы этого пользователя недавно
+        key = (chat_id, user_id)
+        now = datetime.now(UTC)
+        last_mute = recent_spam_mutes.get(key)
+
+        # Если мут был менее SPAM_MUTE_COOLDOWN_SECONDS назад - просто удаляем сообщение
+        if (
+            last_mute
+            and (now - last_mute).total_seconds() < SPAM_MUTE_COOLDOWN_SECONDS
+        ):
+            with contextlib.suppress(Exception):
+                await bot.delete_message(chat_id, message.message_id)
+            return
+
         try:
             # Мутим пользователя
-            until_date = datetime.now(UTC) + SPAM_MUTE_DURATION
+            until_date = now + SPAM_MUTE_DURATION
             await bot.restrict_chat_member(
                 chat_id,
                 user_id,
                 permissions=get_mute_permissions(),
                 until_date=until_date,
             )
+
+            # Запоминаем время мута
+            recent_spam_mutes[key] = now
 
             # Удаляем спам-сообщения
             for msg_id in spam_msg_ids:
@@ -1161,6 +1235,20 @@ async def _update_message_stats(chat_id: int) -> None:
         await session.commit()
 
 
+def _should_filter_message(text_lower: str, f: UserFilter) -> bool:
+    """Проверяет, должно ли сообщение быть отфильтровано."""
+    patterns = [p.strip().lower() for p in f.pattern.split(",")]
+
+    if f.filter_type == "block":
+        return any(p and p in text_lower for p in patterns)
+
+    if f.filter_type == "allow":
+        contains_allowed = any(p and p in text_lower for p in patterns)
+        return not contains_allowed
+
+    return False
+
+
 async def _check_user_filters(message: types.Message, bot: Bot) -> None:
     """Проверяет сообщение на соответствие фильтрам пользователя."""
     if not message.from_user or not message.text:
@@ -1185,89 +1273,42 @@ async def _check_user_filters(message: types.Message, bot: Bot) -> None:
     text_lower = message.text.lower()
 
     for f in filters:
-        patterns = [p.strip().lower() for p in f.pattern.split(",")]
-
-        if f.filter_type == "block":
-            # Удалять если содержит паттерн
-            for pattern in patterns:
-                if pattern and pattern in text_lower:
-                    with contextlib.suppress(Exception):
-                        await bot.delete_message(chat_id, message.message_id)
-                    return
-        elif f.filter_type == "allow":
-            # Удалять если НЕ содержит паттерн
-            contains_allowed = any(p and p in text_lower for p in patterns)
-            if not contains_allowed:
-                with contextlib.suppress(Exception):
-                    await bot.delete_message(chat_id, message.message_id)
-                return
+        if _should_filter_message(text_lower, f):
+            if f.notify:
+                await _notify_admin_about_filter(message, bot)
+            with contextlib.suppress(Exception):
+                await bot.delete_message(chat_id, message.message_id)
+            return
 
 
-# ==================== КОМАНДА /re ====================
-
-
-@router.message(Command("re"))
-async def cmd_re(message: types.Message, bot: Bot) -> None:
-    """Команда проверки статуса бота (только для админов)."""
-    if message.chat.type == ChatType.PRIVATE:
-        await message.answer(
-            "❌ Эта команда работает только в групповых чатах."
-        )
-        return
-
+async def _notify_admin_about_filter(message: types.Message, bot: Bot) -> None:
+    """Отправляет уведомление админу об удалённом сообщении по фильтру."""
     chat_id = message.chat.id
 
-    # Проверяем права администратора
-    if not await is_user_admin(chat_id, message.from_user.id, bot):
-        await message.answer(
-            "❌ Только администраторы могут использовать эту команду."
-        )
-        return
-
-    # Проверяем права бота
-    can_restrict = await can_bot_restrict(chat_id, bot)
-    can_delete = await _can_bot_delete(chat_id, bot)
-
-    # Получаем информацию о чате из БД
-    chat = await _get_chat_from_db(chat_id)
-
-    status_lines = ["🤖 <b>Статус бота</b>\n"]
-
-    if chat and chat.is_active:
-        status_lines.append("✅ Бот активирован")
-    else:
-        status_lines.append("⚠️ Бот не активирован (/setup)")
-
-    if can_restrict:
-        status_lines.append("✅ Может ограничивать пользователей")
-    else:
-        status_lines.append("❌ Нет прав на ограничение")
-
-    if can_delete:
-        status_lines.append("✅ Может удалять сообщения")
-    else:
-        status_lines.append("❌ Нет прав на удаление сообщений")
-
-    status_lines.append("\n💚 <b>Бот работает нормально!</b>")
-
-    await message.answer("\n".join(status_lines), parse_mode="HTML")
-
-
-async def _can_bot_delete(chat_id: int, bot: Bot) -> bool:
-    """Проверяет, может ли бот удалять сообщения."""
-    try:
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
-        if isinstance(bot_member, types.ChatMemberAdministrator):
-            return bot_member.can_delete_messages
-        return False
-    except Exception:
-        return False
-
-
-async def _get_chat_from_db(chat_id: int) -> Chat | None:
-    """Получает чат из базы данных."""
     async with async_session() as session:
         result = await session.execute(
             select(Chat).where(Chat.chat_id == chat_id)
         )
-        return result.scalar_one_or_none()
+        chat = result.scalar_one_or_none()
+
+    if not chat or not chat.activated_by:
+        return
+
+    try:
+        user_name = message.from_user.full_name if message.from_user else "?"
+        chat_title = message.chat.title or "Без названия"
+
+        notification = (
+            f"🗑 <b>Удалено по фильтру</b>\n\n"
+            f"📍 Чат: {chat_title}\n"
+            f"👤 Пользователь: {user_name}\n"
+            f"💬 Сообщение: {message.text[:MAX_FILTER_NOTIFICATION_LENGTH]}"
+        )
+        if len(message.text) > MAX_FILTER_NOTIFICATION_LENGTH:
+            notification += "..."
+
+        await bot.send_message(
+            chat.activated_by, notification, parse_mode="HTML"
+        )
+    except Exception:
+        pass  # Игнорируем ошибки отправки уведомлений

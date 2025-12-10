@@ -24,6 +24,10 @@ class Chat(Base):
         DateTime, server_default=func.now()
     )
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_on_filter: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Настройки команд
+    enable_moderation_cmds: Mapped[bool] = mapped_column(Boolean, default=True)
+    enable_report_cmds: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Warn(Base):
@@ -53,6 +57,8 @@ class UserFilter(Base):
     # Паттерн для фильтрации (через запятую если несколько)
     pattern: Mapped[str] = mapped_column(Text, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Уведомлять ли админа при удалении по этому фильтру
+    notify: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class MessageStats(Base):

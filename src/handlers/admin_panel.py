@@ -24,6 +24,7 @@ class FilterStates(StatesGroup):
     waiting_user_id = State()
     waiting_filter_type = State()
     waiting_pattern = State()
+    editing_pattern = State()  # Редактирование паттерна существующего фильтра
 
 
 async def get_admin_chat(user_id: int) -> Chat | None:
@@ -88,6 +89,12 @@ def get_panel_keyboard(chat: Chat) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="⚙️ Настройки",
+                callback_data="panel:settings",
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="📊 Статистика",
                 callback_data="panel:stats",
             )
@@ -137,7 +144,6 @@ async def get_panel_text(chat: Chat, bot: Bot) -> str:
         title = chat.title or "Без названия"
         member_count = "?"
 
-    stats = await get_chat_stats(chat.chat_id)
     status = "🔒 Закрыт" if chat.is_closed else "🔓 Открыт"
 
     return (
@@ -145,7 +151,6 @@ async def get_panel_text(chat: Chat, bot: Bot) -> str:
         f"📍 <b>Чат:</b> {title}\n"
         f"📊 <b>Статус:</b> {status}\n"
         f"👥 <b>Участников:</b> {member_count}\n"
-        f"💬 <b>Сообщений за 7 дней:</b> {stats['messages_week']}\n"
         f"✅ <b>Бот работает</b>"
     )
 
@@ -175,6 +180,29 @@ async def cmd_panel(message: types.Message, bot: Bot) -> None:
         parse_mode="HTML",
         reply_markup=get_panel_keyboard(chat),
     )
+
+
+@router.callback_query(F.data == "open_panel")
+async def callback_open_panel(callback: types.CallbackQuery, bot: Bot) -> None:
+    """Открытие панели управления по кнопке из /start."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer(
+            "❌ У вас нет активного чата.\n"
+            "Добавьте бота в чат и выполните /setup",
+            show_alert=True,
+        )
+        return
+
+    text = await get_panel_text(chat, bot)
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_panel_keyboard(chat),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "panel:refresh")
@@ -339,7 +367,7 @@ async def callback_filters_menu(callback: types.CallbackQuery) -> None:
         "сообщений отдельных пользователей.\n\n"
         "<b>Типы фильтров:</b>\n"
         "• <b>Блокировать</b> — удалять сообщения содержащие паттерн\n"
-        "• <b>Только разрешить</b> — удалять сообщения НЕ содержащие паттерн",
+        "• <b>Разрешить только</b> — удалять сообщения НЕ содержащие паттерн",
         parse_mode="HTML",
         reply_markup=get_filters_keyboard(),
     )
@@ -399,13 +427,13 @@ async def process_filter_user_id(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="🚫 Блокиро��ать содержащие",
+                        text="🚫 Блокировать содержащие",
                         callback_data="filter_type:block",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text="✅ Только разрешить содержащие",
+                        text="✅ Разрешить только содержащие",
                         callback_data="filter_type:allow",
                     )
                 ],
@@ -426,13 +454,14 @@ async def callback_filters_cancel(
 ) -> None:
     """Отмена добавления фильтра."""
     await state.clear()
+
     await callback.message.edit_text(
         "⚙️ <b>Фильтры сообщений</b>\n\n"
         "Здесь вы можете настроить автоматическое удаление "
         "сообщений отдельных пользователей.\n\n"
         "<b>Типы фильтров:</b>\n"
         "• <b>Блокировать</b> — удалять сообщения содержащие паттерн\n"
-        "• <b>Только разрешить</b> — удалять сообщения НЕ содержащие паттерн",
+        "• <b>Разрешить только</b> — удалять сообщения НЕ содержащие паттерн",
         parse_mode="HTML",
         reply_markup=get_filters_keyboard(),
     )
@@ -556,8 +585,9 @@ async def callback_filter_list(
     text = "📋 <b>Список фильтров</b>\n\n"
     buttons = []
 
-    for f in filters:
+    for idx, f in enumerate(filters, 1):
         type_emoji = "🚫" if f.filter_type == "block" else "✅"
+        notify_emoji = "🔔" if f.notify else "🔕"
         # Пробуем получить имя пользователя
         try:
             tg_user = await bot.get_chat(f.user_id)
@@ -565,13 +595,24 @@ async def callback_filter_list(
         except Exception:
             user_name = str(f.user_id)
 
-        text += f"{type_emoji} {f.user_id} ({user_name}): <code>{f.pattern[:20]}</code>\n"
+        text += (
+            f"<b>{idx}.</b> {type_emoji} {f.user_id} ({user_name}): "
+            f"<code>{f.pattern[:20]}</code> {notify_emoji}\n"
+        )
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"🗑 Удалить #{f.id}",
+                    text=f"{idx}. ✏️",
+                    callback_data=f"panel:filter_edit:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. {notify_emoji}",
+                    callback_data=f"panel:filter_notify:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. 🗑",
                     callback_data=f"panel:filter_del:{f.id}",
-                )
+                ),
             ]
         )
 
@@ -585,6 +626,92 @@ async def callback_filter_list(
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("panel:filter_notify:"))
+async def callback_filter_notify_toggle(
+    callback: types.CallbackQuery, bot: Bot
+) -> None:
+    """Переключение уведомлений для конкретного фильтра."""
+    filter_id = int(callback.data.split(":")[2])
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserFilter).where(UserFilter.id == filter_id)
+        )
+        f = result.scalar_one_or_none()
+        if f:
+            new_value = not f.notify
+            await session.execute(
+                update(UserFilter)
+                .where(UserFilter.id == filter_id)
+                .values(notify=new_value)
+            )
+            await session.commit()
+            status = "включены" if new_value else "выключены"
+            await callback.answer(f"🔔 Уведомления {status}")
+        else:
+            await callback.answer("❌ Фильтр не найден", show_alert=True)
+            return
+
+    # Обновляем список фильтров
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        return
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserFilter).where(
+                UserFilter.chat_id == chat.chat_id, UserFilter.is_active
+            )
+        )
+        filters = list(result.scalars().all())
+
+    text = "📋 <b>Список фильтров</b>\n\n"
+    buttons = []
+
+    for idx, f in enumerate(filters, 1):
+        type_emoji = "🚫" if f.filter_type == "block" else "✅"
+        notify_emoji = "🔔" if f.notify else "🔕"
+        try:
+            tg_user = await bot.get_chat(f.user_id)
+            user_name = tg_user.full_name or tg_user.username or str(f.user_id)
+        except Exception:
+            user_name = str(f.user_id)
+
+        text += (
+            f"<b>{idx}.</b> {type_emoji} {f.user_id} ({user_name}): "
+            f"<code>{f.pattern[:20]}</code> {notify_emoji}\n"
+        )
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{idx}. ✏️",
+                    callback_data=f"panel:filter_edit:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. {notify_emoji}",
+                    callback_data=f"panel:filter_notify:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. 🗑",
+                    callback_data=f"panel:filter_del:{f.id}",
+                ),
+            ]
+        )
+
+    buttons.append(
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="panel:filters")]
+    )
+
+    with contextlib.suppress(TelegramBadRequest):
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
 
 
 @router.callback_query(F.data.startswith("panel:filter_del:"))
@@ -636,21 +763,33 @@ async def callback_filter_delete(
     text = "📋 <b>Список фильтров</b>\n\n"
     buttons = []
 
-    for f in filters:
+    for idx, f in enumerate(filters, 1):
         type_emoji = "🚫" if f.filter_type == "block" else "✅"
+        notify_emoji = "🔔" if f.notify else "🔕"
         try:
             tg_user = await bot.get_chat(f.user_id)
             user_name = tg_user.full_name or tg_user.username or str(f.user_id)
         except Exception:
             user_name = str(f.user_id)
 
-        text += f"{type_emoji} {f.user_id} ({user_name}): <code>{f.pattern[:20]}</code>\n"
+        text += (
+            f"<b>{idx}.</b> {type_emoji} {f.user_id} ({user_name}): "
+            f"<code>{f.pattern[:20]}</code> {notify_emoji}\n"
+        )
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"🗑 Удалить #{f.id}",
+                    text=f"{idx}. ✏️",
+                    callback_data=f"panel:filter_edit:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. {notify_emoji}",
+                    callback_data=f"panel:filter_notify:{f.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{idx}. 🗑",
                     callback_data=f"panel:filter_del:{f.id}",
-                )
+                ),
             ]
         )
 
@@ -663,6 +802,207 @@ async def callback_filter_delete(
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
+
+
+# ==================== РЕДАКТИРОВАНИЕ ФИЛЬТРА ====================
+
+
+@router.callback_query(F.data.startswith("panel:filter_edit:"))
+async def callback_filter_edit(
+    callback: types.CallbackQuery, state: FSMContext, bot: Bot
+) -> None:
+    """Начало редактирования паттерна фильтра."""
+    filter_id = int(callback.data.split(":")[2])
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserFilter).where(UserFilter.id == filter_id)
+        )
+        f = result.scalar_one_or_none()
+
+    if not f:
+        await callback.answer("❌ Фильтр не найден", show_alert=True)
+        return
+
+    await state.update_data(editing_filter_id=filter_id)
+    await state.set_state(FilterStates.editing_pattern)
+
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование фильтра #{filter_id}</b>\n\n"
+        f"Текущий паттерн: <code>{f.pattern}</code>\n\n"
+        "Введите новый паттерн:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="❌ Отмена",
+                        callback_data="panel:filter_list",
+                    )
+                ]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter(FilterStates.editing_pattern))
+async def process_filter_edit_pattern(
+    message: types.Message, state: FSMContext
+) -> None:
+    """Обработка нового паттерна фильтра."""
+    if not message.text:
+        await message.answer("❌ Введите текст для фильтрации")
+        return
+
+    data = await state.get_data()
+    filter_id = data.get("editing_filter_id")
+
+    if not filter_id:
+        await state.clear()
+        await message.answer("❌ Ошибка: фильтр не найден")
+        return
+
+    new_pattern = message.text.strip()
+
+    async with async_session() as session:
+        await session.execute(
+            update(UserFilter)
+            .where(UserFilter.id == filter_id)
+            .values(pattern=new_pattern)
+        )
+        await session.commit()
+
+    await state.clear()
+
+    await message.answer(
+        f"✅ <b>Фильтр обновлён!</b>\n\n"
+        f"Новый паттерн: <code>{new_pattern}</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📋 К списку фильтров",
+                        callback_data="panel:filter_list",
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+# ==================== НАСТРОЙКИ ====================
+
+
+def get_settings_keyboard(chat: Chat) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру настроек."""
+    mod_status = "✅" if chat.enable_moderation_cmds else "❌"
+    report_status = "✅" if chat.enable_report_cmds else "❌"
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=f"{mod_status} Команды модерации (бан/мут/кик)",
+                callback_data="settings:toggle_mod",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{report_status} Команды репортов (админ/репорт)",
+                callback_data="settings:toggle_report",
+            )
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="panel:main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.callback_query(F.data == "panel:settings")
+async def callback_settings_menu(callback: types.CallbackQuery) -> None:
+    """Меню настроек."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer("❌ Чат не найден", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "⚙️ <b>Настройки бота</b>\n\n"
+        "Здесь вы можете включить или выключить группы команд.\n\n"
+        "<b>Команды модерации:</b>\n"
+        "бан, мут, кик, разбан, размут (и англ. варианты)\n\n"
+        "<b>Команды репортов:</b>\n"
+        "!admin, !админ, !report, !репорт",
+        parse_mode="HTML",
+        reply_markup=get_settings_keyboard(chat),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings:toggle_mod")
+async def callback_toggle_moderation(callback: types.CallbackQuery) -> None:
+    """Переключение команд модерации."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer("❌ Чат не найден", show_alert=True)
+        return
+
+    new_value = not chat.enable_moderation_cmds
+
+    async with async_session() as session:
+        await session.execute(
+            update(Chat)
+            .where(Chat.chat_id == chat.chat_id)
+            .values(enable_moderation_cmds=new_value)
+        )
+        await session.commit()
+
+    # Обновляем объект чата
+    chat = await get_admin_chat(user_id)
+
+    status = "включены" if new_value else "выключены"
+    await callback.answer(f"Команды модерации {status}")
+
+    with contextlib.suppress(TelegramBadRequest):
+        await callback.message.edit_reply_markup(
+            reply_markup=get_settings_keyboard(chat)
+        )
+
+
+@router.callback_query(F.data == "settings:toggle_report")
+async def callback_toggle_report(callback: types.CallbackQuery) -> None:
+    """Переключение команд репортов."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer("❌ Чат не найден", show_alert=True)
+        return
+
+    new_value = not chat.enable_report_cmds
+
+    async with async_session() as session:
+        await session.execute(
+            update(Chat)
+            .where(Chat.chat_id == chat.chat_id)
+            .values(enable_report_cmds=new_value)
+        )
+        await session.commit()
+
+    # Обновляем объект чата
+    chat = await get_admin_chat(user_id)
+
+    status = "включены" if new_value else "выключены"
+    await callback.answer(f"Команды репортов {status}")
+
+    with contextlib.suppress(TelegramBadRequest):
+        await callback.message.edit_reply_markup(
+            reply_markup=get_settings_keyboard(chat)
+        )
 
 
 @router.callback_query(F.data == "panel:stats")

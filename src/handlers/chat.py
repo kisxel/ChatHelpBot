@@ -32,6 +32,28 @@ async def is_bot_admin(chat_id: int, bot: Bot) -> bool:
         return False
 
 
+async def can_bot_restrict(chat_id: int, bot: Bot) -> bool:
+    """Проверяет, может ли бот ограничивать пользователей."""
+    try:
+        bot_member = await bot.get_chat_member(chat_id, bot.id)
+        if isinstance(bot_member, types.ChatMemberAdministrator):
+            return bot_member.can_restrict_members
+        return False
+    except Exception:
+        return False
+
+
+async def can_bot_delete(chat_id: int, bot: Bot) -> bool:
+    """Проверяет, может ли бот удалять сообщения."""
+    try:
+        bot_member = await bot.get_chat_member(chat_id, bot.id)
+        if isinstance(bot_member, types.ChatMemberAdministrator):
+            return bot_member.can_delete_messages
+        return False
+    except Exception:
+        return False
+
+
 async def get_chat_from_db(chat_id: int) -> Chat | None:
     """Получает информацию о чате из базы данных."""
     async with async_session() as session:
@@ -88,10 +110,7 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     # Проверяем, не активирован ли уже бот в этом чате
     existing_chat = await get_chat_from_db(chat_id)
     if existing_chat and existing_chat.is_active:
-        await message.answer(
-            "✅ Бот уже активирован в этом чате!\n"
-            "Используйте /help для списка команд."
-        )
+        await message.answer("✅ Бот уже активирован в этом чате!")
         return
 
     # Проверяем, не активирован ли бот в другом чате
@@ -124,38 +143,48 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     # Активируем чат в базе данных
     await activate_chat(chat_id, message.chat.title, user_id)
 
-    await message.answer(
-        "✅ Бот успешно активирован в этом чате!\n\n"
-        "Доступные команды:\n"
-        "/status - проверить статус бота\n"
-        "/help - список всех команд"
-    )
+    await message.answer("✅ Бот успешно активирован в этом чате!")
 
 
-@router.message(Command("status"))
-async def cmd_status(message: types.Message, bot: Bot) -> None:
-    """Команда для проверки статуса бота в чате."""
+@router.message(Command("check"))
+async def cmd_check(message: types.Message, bot: Bot) -> None:
+    """Команда проверки состояния бота (для всех пользователей)."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
-            "ℹ️ Эта команда работает только в групповых чатах."
+            "❌ Эта команда работает только в групповых чатах."
         )
         return
 
     chat_id = message.chat.id
-    chat = await get_chat_from_db(chat_id)
 
-    bot_is_admin = await is_bot_admin(chat_id, bot)
+    try:
+        # Проверяем права бота
+        bot_can_restrict = await can_bot_restrict(chat_id, bot)
+        bot_can_delete = await can_bot_delete(chat_id, bot)
 
-    status_text = "📊 <b>Статус бота в чате</b>\n\n"
+        # Получаем информацию о чате из БД
+        chat = await get_chat_from_db(chat_id)
 
-    if chat and chat.is_active:
-        status_text += "✅ Бот активирован\n"
-    else:
-        status_text += "❌ Бот не активирован (используйте /setup)\n"
+        if chat and chat.is_active and bot_can_restrict and bot_can_delete:
+            await message.answer("✅ Бот активирован и работает!")
+        else:
+            status_lines = ["🤖 <b>Состояние бота</b>\n"]
 
-    if bot_is_admin:
-        status_text += "✅ Бот является администратором\n"
-    else:
-        status_text += "⚠️ Бот НЕ является администратором\n"
+            if chat and chat.is_active:
+                status_lines.append("✅ Бот активирован")
+            else:
+                status_lines.append("⚠️ Бот не активирован (/setup)")
 
-    await message.answer(status_text, parse_mode="HTML")
+            if bot_can_restrict:
+                status_lines.append("✅ Может ограничивать пользователей")
+            else:
+                status_lines.append("❌ Нет прав на ограничение")
+
+            if bot_can_delete:
+                status_lines.append("✅ Может удалять сообщения")
+            else:
+                status_lines.append("❌ Нет прав на удаление сообщений")
+
+            await message.answer("\n".join(status_lines), parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка проверки: {e}")

@@ -2,7 +2,11 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+)
 
 from src.config import BOT_TOKEN
 from src.database.core import init_db
@@ -22,6 +26,14 @@ async def set_bot_commands(bot: Bot) -> None:
     ]
     await bot.set_my_commands(
         private_commands, scope=BotCommandScopeAllPrivateChats()
+    )
+
+    # Команды для групповых чатов
+    group_commands = [
+        BotCommand(command="check", description="Проверить состояние бота"),
+    ]
+    await bot.set_my_commands(
+        group_commands, scope=BotCommandScopeAllGroupChats()
     )
 
 
