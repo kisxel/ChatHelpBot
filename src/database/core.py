@@ -27,3 +27,57 @@ async def init_db() -> None:
                     "ALTER TABLE chats ADD COLUMN is_closed BOOLEAN DEFAULT 0"
                 )
             )
+
+        # Добавляем linked_channel_id в chats если не существует
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("ALTER TABLE chats ADD COLUMN linked_channel_id BIGINT")
+            )
+
+        # Переименовываем channel_rules_text в channel_post_text
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats RENAME COLUMN channel_rules_text "
+                    "TO channel_post_text"
+                )
+            )
+
+        # Добавляем channel_post_text если не существует (для новых БД)
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("ALTER TABLE chats ADD COLUMN channel_post_text TEXT")
+            )
+
+        # Добавляем chat_rules_text - правила чата
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("ALTER TABLE chats ADD COLUMN chat_rules_text TEXT")
+            )
+
+        # Добавляем channel_post_enabled - вкл/выкл автоответа
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN channel_post_enabled "
+                    "BOOLEAN DEFAULT 1"
+                )
+            )
+
+        # Добавляем close_chat_on_post - закрывать ли чат после поста
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN close_chat_on_post "
+                    "BOOLEAN DEFAULT 0"
+                )
+            )
+
+        # Добавляем close_chat_duration - длительность закрытия
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN close_chat_duration "
+                    "INTEGER DEFAULT 10"
+                )
+            )

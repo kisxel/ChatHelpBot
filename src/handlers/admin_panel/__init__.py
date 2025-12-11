@@ -11,8 +11,8 @@ from src.handlers.admin_panel.warns import router as warns_router
 router = Router(name="admin_panel")
 
 router.include_router(panel_router)
-router.include_router(filters_router)
-router.include_router(settings_router)
+router.include_router(settings_router)  # FSM обработчики для канала
+router.include_router(filters_router)  # FSM обработчики для фильтров
 router.include_router(stats_router)
 router.include_router(warns_router)
 

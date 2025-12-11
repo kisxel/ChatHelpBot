@@ -82,6 +82,18 @@ def get_settings_keyboard(chat: Chat) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="📜 Правила чата (!правила)",
+                callback_data="settings:rules",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📢 Настроить канал",
+                callback_data="settings:channel",
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text=closed_text,
                 callback_data=f"panel:toggle:{closed_action}",
             )
@@ -123,3 +135,55 @@ def get_unmute_keyboard(user_id: int) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def get_channel_settings_keyboard(
+    chat: Chat | None = None,
+) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру настроек канала."""
+    post_enabled = chat.channel_post_enabled if chat else True
+    close_enabled = chat.close_chat_on_post if chat else False
+
+    post_status = "✅" if post_enabled else "❌"
+    close_status = "✅" if close_enabled else "❌"
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text="📝 Изменить ID канала",
+                callback_data="settings:channel_id",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💬 Текст для поста",
+                callback_data="settings:channel_post_text",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{post_status} Автоответ на посты",
+                callback_data="settings:toggle_post_enabled",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{close_status} Закрывать чат после поста",
+                callback_data="settings:toggle_close_chat",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="⏱ Длительность закрытия",
+                callback_data="settings:close_duration",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🗑 Удалить привязку канала",
+                callback_data="settings:channel_remove",
+            )
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="panel:settings")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

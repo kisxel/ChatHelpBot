@@ -6,9 +6,12 @@ from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, F, Router, types
 from aiogram.enums import ChatType
+from sqlalchemy import select
 
 from src.common.keyboards import get_unban_keyboard, get_unmute_keyboard
 from src.common.permissions import can_bot_restrict, is_user_admin
+from src.database.core import async_session
+from src.database.models import Chat
 from src.handlers.moderation.utils import (
     MIN_MUTE_SECONDS,
     are_moderation_cmds_enabled,
@@ -403,3 +406,32 @@ async def execute_kick(
         await message.answer(response, parse_mode="HTML")
     except Exception as e:
         await message.answer(f"❌ Ошибка при кике: {e}")
+
+
+# Регулярное выражение для команды правил (только с !)
+RULES_CMD_PATTERN = re.compile(r"^!(правила|rules)$", re.IGNORECASE)
+
+
+@router.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text.regexp(RULES_CMD_PATTERN),
+)
+async def handle_rules_command(message: types.Message) -> None:
+    """Обработка команды !правила (!rules)."""
+    chat_id = message.chat.id
+
+    # Получаем правила из БД
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id, Chat.is_active)
+        )
+        chat = result.scalar_one_or_none()
+
+    if not chat or not chat.chat_rules_text:
+        await message.answer("📜 Правила чата не заданы.")
+        return
+
+    await message.answer(
+        f"📜 <b>Правила чата</b>\n\n{chat.chat_rules_text}",
+        parse_mode="HTML",
+    )

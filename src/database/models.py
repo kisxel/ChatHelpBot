@@ -28,6 +28,24 @@ class Chat(Base):
     # Настройки команд
     enable_moderation_cmds: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_report_cmds: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Привязанный канал для автоответа на посты (хранится полный ID с -100)
+    linked_channel_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
+    # Текст сообщения для ответа на пост канала
+    channel_post_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    # Текст правил чата (для команды !правила)
+    chat_rules_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    # Включен ли автоответ на посты канала
+    channel_post_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Закрывать ли чат после поста (антибот)
+    close_chat_on_post: Mapped[bool] = mapped_column(Boolean, default=False)
+    # На сколько секунд закрывать чат после поста
+    close_chat_duration: Mapped[int] = mapped_column(Integer, default=10)
 
 
 class Warn(Base):
