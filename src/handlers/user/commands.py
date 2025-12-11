@@ -3,7 +3,11 @@
 from aiogram import Bot, Router, types
 from aiogram.enums import ChatType
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from sqlalchemy import select
 
 from src.database.core import async_session
@@ -35,6 +39,10 @@ async def cmd_start(message: types.Message, bot: Bot) -> None:
                 "Администратор может активировать его командой /setup"
             )
         return
+
+    # Убираем reply клавиатуру если она осталась
+    await message.answer(".", reply_markup=ReplyKeyboardRemove())
+    await message.bot.delete_message(message.chat.id, message.message_id + 1)
 
     # В личных сообщениях показываем приветствие
     await message.answer(

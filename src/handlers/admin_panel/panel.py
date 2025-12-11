@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.common.keyboards import get_panel_keyboard
+from src.common.keyboards import get_panel_keyboard, get_settings_keyboard
 from src.database.models import Chat
 from src.handlers.admin_panel.utils import (
     deactivate_chat,
@@ -178,15 +178,15 @@ async def callback_toggle_chat(
         await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
         return
 
-    # Обновляем панель
+    # Обновляем меню настроек
     chat = await get_admin_chat(user_id)
     if chat:
-        text = await get_panel_text(chat, bot)
         with contextlib.suppress(TelegramBadRequest):
             await callback.message.edit_text(
-                text,
+                "⚙️ <b>Настройки бота</b>\n\n"
+                "Здесь вы можете настроить параметры бота.",
                 parse_mode="HTML",
-                reply_markup=get_panel_keyboard(chat),
+                reply_markup=get_settings_keyboard(chat),
             )
 
 
@@ -208,7 +208,7 @@ async def callback_deactivate(callback: types.CallbackQuery, bot: Bot) -> None:
                 ],
                 [
                     InlineKeyboardButton(
-                        text="❌ Отмена", callback_data="panel:main"
+                        text="❌ Отмена", callback_data="panel:settings"
                     )
                 ],
             ]
