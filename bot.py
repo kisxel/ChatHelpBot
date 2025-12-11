@@ -2,11 +2,20 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+)
 
 from src.config import BOT_TOKEN
 from src.database.core import init_db
-from src.handlers import admin_panel, chat, moderation, user
+from src.handlers import (
+    admin_panel_router,
+    chat_router,
+    moderation_router,
+    user_router,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,6 +33,14 @@ async def set_bot_commands(bot: Bot) -> None:
         private_commands, scope=BotCommandScopeAllPrivateChats()
     )
 
+    # Команды для групповых чатов
+    group_commands = [
+        BotCommand(command="check", description="Проверить состояние бота"),
+    ]
+    await bot.set_my_commands(
+        group_commands, scope=BotCommandScopeAllGroupChats()
+    )
+
 
 async def main() -> None:
     await init_db()
@@ -31,10 +48,11 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    dp.include_router(user.router)
-    dp.include_router(chat.router)
-    dp.include_router(admin_panel.router)
-    dp.include_router(moderation.router)
+    # Порядок важен! Роутеры обрабатываются в порядке подключения
+    dp.include_router(user_router)
+    dp.include_router(chat_router)
+    dp.include_router(admin_panel_router)
+    dp.include_router(moderation_router)  # Последний - содержит антиспам
 
     # Устанавливаем меню команд
     await set_bot_commands(bot)

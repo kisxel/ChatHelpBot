@@ -1,35 +1,20 @@
-"""Обработчики для управления чатами."""
+"""Команды управления чатом: /setup, /check."""
 
 from aiogram import Bot, Router, types
-from aiogram.enums import ChatMemberStatus, ChatType
+from aiogram.enums import ChatType
 from aiogram.filters import Command
 from sqlalchemy import select
 
+from src.common.permissions import (
+    can_bot_delete,
+    can_bot_restrict,
+    is_bot_admin,
+    is_user_admin,
+)
 from src.database.core import async_session
 from src.database.models import Chat
 
-router = Router()
-
-
-async def is_user_admin(chat_id: int, user_id: int, bot: Bot) -> bool:
-    """Проверяет, является ли пользователь администратором чата."""
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-        return member.status in (
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.CREATOR,
-        )
-    except Exception:
-        return False
-
-
-async def is_bot_admin(chat_id: int, bot: Bot) -> bool:
-    """Проверяет, является ли бот администратором чата."""
-    try:
-        bot_member = await bot.get_chat_member(chat_id, bot.id)
-        return bot_member.status == ChatMemberStatus.ADMINISTRATOR
-    except Exception:
-        return False
+router = Router(name="chat")
 
 
 async def get_chat_from_db(chat_id: int) -> Chat | None:
@@ -73,8 +58,7 @@ async def activate_chat(
 
 @router.message(Command("setup"))
 async def cmd_setup(message: types.Message, bot: Bot) -> None:
-    """Команда для активации бота в чате."""
-    # Проверяем, что команда вызвана в группе
+    """Команда /setup - активация бота в чате."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах.\n"
@@ -88,10 +72,7 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     # Проверяем, не активирован ли уже бот в этом чате
     existing_chat = await get_chat_from_db(chat_id)
     if existing_chat and existing_chat.is_active:
-        await message.answer(
-            "✅ Бот уже активирован в этом чате!\n"
-            "Используйте /help для списка команд."
-        )
+        await message.answer("✅ Бот уже активирован в этом чате!")
         return
 
     # Проверяем, не активирован ли бот в другом чате
@@ -123,39 +104,45 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
 
     # Активируем чат в базе данных
     await activate_chat(chat_id, message.chat.title, user_id)
-
-    await message.answer(
-        "✅ Бот успешно активирован в этом чате!\n\n"
-        "Доступные команды:\n"
-        "/status - проверить статус бота\n"
-        "/help - список всех команд"
-    )
+    await message.answer("✅ Бот успешно активирован в этом чате!")
 
 
-@router.message(Command("status"))
-async def cmd_status(message: types.Message, bot: Bot) -> None:
-    """Команда для проверки статуса бота в чате."""
+@router.message(Command("check"))
+async def cmd_check(message: types.Message, bot: Bot) -> None:
+    """Команда /check - проверка состояния бота."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
-            "ℹ️ Эта команда работает только в групповых чатах."
+            "❌ Эта команда работает только в групповых чатах."
         )
         return
 
     chat_id = message.chat.id
-    chat = await get_chat_from_db(chat_id)
 
-    bot_is_admin = await is_bot_admin(chat_id, bot)
+    try:
+        bot_can_restrict = await can_bot_restrict(chat_id, bot)
+        bot_can_delete = await can_bot_delete(chat_id, bot)
+        chat = await get_chat_from_db(chat_id)
 
-    status_text = "📊 <b>Статус бота в чате</b>\n\n"
+        if chat and chat.is_active and bot_can_restrict and bot_can_delete:
+            await message.answer("✅ Бот активирован и работает!")
+        else:
+            status_lines = ["🤖 <b>Состояние бота</b>\n"]
 
-    if chat and chat.is_active:
-        status_text += "✅ Бот активирован\n"
-    else:
-        status_text += "❌ Бот не активирован (используйте /setup)\n"
+            if chat and chat.is_active:
+                status_lines.append("✅ Бот активирован")
+            else:
+                status_lines.append("⚠️ Бот не активирован (/setup)")
 
-    if bot_is_admin:
-        status_text += "✅ Бот является администратором\n"
-    else:
-        status_text += "⚠️ Бот НЕ является администратором\n"
+            if bot_can_restrict:
+                status_lines.append("✅ Может ограничивать пользователей")
+            else:
+                status_lines.append("❌ Нет прав на ограничение")
 
-    await message.answer(status_text, parse_mode="HTML")
+            if bot_can_delete:
+                status_lines.append("✅ Может удалять сообщения")
+            else:
+                status_lines.append("❌ Нет прав на удаление сообщений")
+
+            await message.answer("\n".join(status_lines), parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка проверки: {e}")
