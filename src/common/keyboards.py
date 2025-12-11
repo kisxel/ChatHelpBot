@@ -62,27 +62,19 @@ def get_filters_keyboard() -> InlineKeyboardMarkup:
 
 def get_settings_keyboard(chat: Chat) -> InlineKeyboardMarkup:
     """Создаёт клавиатуру настроек."""
-    mod_status = "✅" if chat.enable_moderation_cmds else "❌"
-    report_status = "✅" if chat.enable_report_cmds else "❌"
     closed_text = "🔓 Открыть чат" if chat.is_closed else "🔒 Закрыть чат"
     closed_action = "open" if chat.is_closed else "close"
 
     buttons = [
         [
             InlineKeyboardButton(
-                text=f"{mod_status} Команды модерации (бан/мут/кик)",
-                callback_data="settings:toggle_mod",
+                text="💬 Реакция на команды",
+                callback_data="settings:commands",
             )
         ],
         [
             InlineKeyboardButton(
-                text=f"{report_status} Команды репортов (админ/репорт)",
-                callback_data="settings:toggle_report",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="📜 Правила чата (!правила)",
+                text="📜 Правила чата",
                 callback_data="settings:rules",
             )
         ],
@@ -105,6 +97,36 @@ def get_settings_keyboard(chat: Chat) -> InlineKeyboardMarkup:
             )
         ],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="panel:main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_commands_keyboard(chat: Chat) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру настроек реакции на команды."""
+    mod_status = "✅" if chat.enable_moderation_cmds else "❌"
+    report_status = "✅" if chat.enable_report_cmds else "❌"
+    rules_status = "✅" if chat.enable_rules_cmds else "❌"
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=f"{mod_status} Модерация (бан/мут/кик)",
+                callback_data="settings:toggle_mod",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{report_status} Репорты (!admin/!репорт)",
+                callback_data="settings:toggle_report",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{rules_status} Правила (!правила/!rules)",
+                callback_data="settings:toggle_rules",
+            )
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="panel:settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -156,7 +178,7 @@ def get_channel_settings_keyboard(
         ],
         [
             InlineKeyboardButton(
-                text="💬 Текст для поста",
+                text="💬 Текст под пост",
                 callback_data="settings:channel_post_text",
             )
         ],

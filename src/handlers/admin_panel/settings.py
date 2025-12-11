@@ -12,6 +12,7 @@ from sqlalchemy import update
 
 from src.common.keyboards import (
     get_channel_settings_keyboard,
+    get_commands_keyboard,
     get_settings_keyboard,
 )
 from src.database.core import async_session
@@ -39,7 +40,6 @@ class ChannelSettingsStates(StatesGroup):
     """Состояния для настройки канала."""
 
     waiting_channel_id = State()
-    waiting_post_text = State()
     waiting_rules_text = State()
     waiting_close_duration = State()
 
@@ -55,14 +55,34 @@ async def callback_settings_menu(callback: types.CallbackQuery) -> None:
         return
 
     await callback.message.edit_text(
-        "⚙️ <b>Настройки бота</b>\n\n"
-        "Здесь вы можете включить или выключить группы команд.\n\n"
-        "<b>Команды модерации:</b>\n"
-        "бан, мут, кик, разбан, размут (и англ. варианты)\n\n"
-        "<b>Команды репортов:</b>\n"
-        "!admin, !админ, !report, !репорт",
+        "⚙️ <b>Настройки бота</b>\n\nВыберите раздел для настройки.",
         parse_mode="HTML",
         reply_markup=get_settings_keyboard(chat),
+    )
+    await callback.answer()
+
+
+# === Меню реакции на команды ===
+
+
+@router.callback_query(F.data == "settings:commands")
+async def callback_commands_menu(callback: types.CallbackQuery) -> None:
+    """Меню настроек реакции на команды."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer("❌ Чат не найден", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "💬 <b>Реакция на команды</b>\n\n"
+        "Включите или выключите реакцию бота на различные команды.\n\n"
+        "<b>Модерация:</b> бан, мут, кик, разбан, размут\n"
+        "<b>Репорты:</b> !admin, !админ, !report, !репорт\n"
+        "<b>Правила:</b> !правила, !rules",
+        parse_mode="HTML",
+        reply_markup=get_commands_keyboard(chat),
     )
     await callback.answer()
 
@@ -93,7 +113,7 @@ async def callback_toggle_moderation(callback: types.CallbackQuery) -> None:
 
     with contextlib.suppress(TelegramBadRequest):
         await callback.message.edit_reply_markup(
-            reply_markup=get_settings_keyboard(chat)
+            reply_markup=get_commands_keyboard(chat)
         )
 
 
@@ -123,7 +143,37 @@ async def callback_toggle_report(callback: types.CallbackQuery) -> None:
 
     with contextlib.suppress(TelegramBadRequest):
         await callback.message.edit_reply_markup(
-            reply_markup=get_settings_keyboard(chat)
+            reply_markup=get_commands_keyboard(chat)
+        )
+
+
+@router.callback_query(F.data == "settings:toggle_rules")
+async def callback_toggle_rules(callback: types.CallbackQuery) -> None:
+    """Переключение команд правил."""
+    user_id = callback.from_user.id
+    chat = await get_admin_chat(user_id)
+
+    if not chat:
+        await callback.answer("❌ Чат не найден", show_alert=True)
+        return
+
+    new_value = not chat.enable_rules_cmds
+
+    async with async_session() as session:
+        await session.execute(
+            update(Chat)
+            .where(Chat.chat_id == chat.chat_id)
+            .values(enable_rules_cmds=new_value)
+        )
+        await session.commit()
+
+    chat = await get_admin_chat(user_id)
+    status = "включены" if new_value else "выключены"
+    await callback.answer(f"Команды правил {status}")
+
+    with contextlib.suppress(TelegramBadRequest):
+        await callback.message.edit_reply_markup(
+            reply_markup=get_commands_keyboard(chat)
         )
 
 
@@ -396,115 +446,7 @@ async def process_channel_id(
         )
 
 
-@router.callback_query(F.data == "settings:channel_post_text")
-async def callback_post_text_menu(callback: types.CallbackQuery) -> None:
-    """Меню текста для ответа на пост."""
-    user_id = callback.from_user.id
-    chat = await get_admin_chat(user_id)
-
-    if not chat:
-        await callback.answer("❌ Чат не найден", show_alert=True)
-        return
-
-    post_text = chat.channel_post_text or "Не задан"
-    if len(post_text) > MAX_TEXT_PREVIEW_LENGTH:
-        post_text = post_text[:MAX_TEXT_PREVIEW_LENGTH] + "..."
-
-    await callback.message.edit_text(
-        f"📝 <b>Текст для ответа на пост</b>\n\n"
-        f"Этот текст будет автоматически отправляться в комментарии "
-        f"при появлении нового поста в канале.\n\n"
-        f"<b>Текущий текст:</b>\n{post_text}",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="✏️ Изменить текст",
-                        callback_data="settings:channel_post_text_edit",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="◀️ Назад", callback_data="settings:channel"
-                    )
-                ],
-            ]
-        ),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "settings:channel_post_text_edit")
-async def callback_post_text_edit(
-    callback: types.CallbackQuery, state: FSMContext
-) -> None:
-    """Редактирование текста для ответа на пост."""
-    await callback.message.edit_text(
-        "📝 <b>Введите текст для ответа на пост</b>\n\n"
-        "Этот текст будет автоматически отправляться в комментарии "
-        "при появлении нового поста в канале.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="❌ Отмена",
-                        callback_data="settings:channel_post_text",
-                    )
-                ]
-            ]
-        ),
-    )
-    await state.set_state(ChannelSettingsStates.waiting_post_text)
-    await callback.answer()
-
-
-@router.message(StateFilter(ChannelSettingsStates.waiting_post_text))
-async def process_post_text(message: types.Message, state: FSMContext) -> None:
-    """Обработка введённого текста для поста."""
-    if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение")
-        return
-
-    user_id = message.from_user.id
-    chat = await get_admin_chat(user_id)
-
-    if not chat:
-        await message.answer("❌ Чат не найден")
-        await state.clear()
-        return
-
-    post_text = message.text.strip()
-
-    if len(post_text) > MAX_TEXT_LENGTH:
-        await message.answer(
-            f"❌ Текст слишком длинный. Максимум {MAX_TEXT_LENGTH} символов."
-        )
-        return
-
-    async with async_session() as session:
-        await session.execute(
-            update(Chat)
-            .where(Chat.chat_id == chat.chat_id)
-            .values(channel_post_text=post_text)
-        )
-        await session.commit()
-
-    await state.clear()
-    await message.answer(
-        "✅ Текст для поста сохранён!",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="◀️ Назад к тексту поста",
-                        callback_data="settings:channel_post_text",
-                    )
-                ]
-            ]
-        ),
-    )
+# Обработчик settings:channel_post_text теперь в post_message.py
 
 
 @router.callback_query(F.data == "settings:toggle_post_enabled")

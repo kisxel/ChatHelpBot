@@ -420,14 +420,21 @@ async def handle_rules_command(message: types.Message) -> None:
     """Обработка команды !правила (!rules)."""
     chat_id = message.chat.id
 
-    # Получаем правила из БД
+    # Получаем чат из БД
     async with async_session() as session:
         result = await session.execute(
             select(Chat).where(Chat.chat_id == chat_id, Chat.is_active)
         )
         chat = result.scalar_one_or_none()
 
-    if not chat or not chat.chat_rules_text:
+    if not chat:
+        return
+
+    # Проверяем включены ли команды правил
+    if not chat.enable_rules_cmds:
+        return
+
+    if not chat.chat_rules_text:
         await message.answer("📜 Правила чата не заданы.")
         return
 

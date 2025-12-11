@@ -81,3 +81,32 @@ async def init_db() -> None:
                     "INTEGER DEFAULT 10"
                 )
             )
+
+        # Добавляем channel_post_media_id - ID медиа для поста
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("ALTER TABLE chats ADD COLUMN channel_post_media_id TEXT")
+            )
+
+        # Добавляем channel_post_media_type - тип медиа
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN channel_post_media_type TEXT"
+                )
+            )
+
+        # Добавляем channel_post_buttons - кнопки в JSON
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("ALTER TABLE chats ADD COLUMN channel_post_buttons TEXT")
+            )
+
+        # Добавляем enable_rules_cmds - вкл/выкл команды правил
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN enable_rules_cmds "
+                    "BOOLEAN DEFAULT 1"
+                )
+            )
