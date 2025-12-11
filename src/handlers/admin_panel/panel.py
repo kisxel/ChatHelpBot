@@ -31,11 +31,22 @@ async def get_panel_text(chat: Chat, bot: Bot) -> str:
 
     status = "🔒 Закрыт" if chat.is_closed else "🔓 Открыт"
 
+    # Информация о привязанном канале
+    channel_info = "Не привязан"
+    if chat.linked_channel_id:
+        try:
+            channel = await bot.get_chat(chat.linked_channel_id)
+            channel_title = channel.title or "Без названия"
+            channel_info = f"{channel_title}"
+        except Exception:
+            channel_info = str(chat.linked_channel_id)
+
     return (
         f"🎛 <b>Панель управления</b>\n\n"
         f"📍 <b>Чат:</b> {title}\n"
         f"📊 <b>Статус:</b> {status}\n"
         f"👥 <b>Участников:</b> {member_count}\n"
+        f"📢 <b>Канал:</b> {channel_info}\n"
         f"✅ <b>Бот работает</b>"
     )
 
