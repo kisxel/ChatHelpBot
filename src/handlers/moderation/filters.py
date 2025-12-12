@@ -1,6 +1,7 @@
 """Фильтрация сообщений пользователей."""
 
 import contextlib
+from pathlib import Path
 
 from aiogram import Bot, types
 from sqlalchemy import select
@@ -10,6 +11,51 @@ from src.database.models import Chat, UserFilter
 
 # Максимальная длина сообщения в уведомлении о фильтре
 MAX_FILTER_NOTIFICATION_LENGTH = 200
+
+# Путь к файлу со списком запрещённых слов
+BAD_WORDS_FILE = (
+    Path(__file__).parent.parent.parent.parent / "data" / "bad_words.txt"
+)
+
+
+# Кэш запрещённых слов (для производительности)
+class BadWordsCache:
+    """Кэш для запрещённых слов."""
+
+    def __init__(self) -> None:
+        self.words: set[str] | None = None
+        self.mtime: float = 0
+
+
+_cache = BadWordsCache()
+
+
+def load_bad_words() -> set[str]:
+    """Загружает список запрещённых слов из файла с кэшированием."""
+    if not BAD_WORDS_FILE.exists():
+        return set()
+
+    # Проверяем, изменился ли файл
+    current_mtime = BAD_WORDS_FILE.stat().st_mtime
+    if _cache.words is not None and current_mtime == _cache.mtime:
+        return _cache.words
+
+    # Перезагружаем кэш
+    with open(BAD_WORDS_FILE, encoding="utf-8") as f:
+        _cache.words = {line.strip().lower() for line in f if line.strip()}
+    _cache.mtime = current_mtime
+
+    return _cache.words
+
+
+def contains_bad_word(text: str) -> bool:
+    """Проверяет, содержит ли текст запрещённые слова."""
+    bad_words = load_bad_words()
+    if not bad_words:
+        return False
+
+    text_lower = text.lower()
+    return any(word in text_lower for word in bad_words)
 
 
 def get_message_text(message: types.Message) -> str | None:
@@ -108,3 +154,37 @@ async def notify_admin_about_filter(
         )
     except Exception:
         pass
+
+
+async def check_bad_words(message: types.Message, bot: Bot) -> bool:
+    """Проверяет сообщение на запрещённые слова и удаляет при необходимости.
+
+    Возвращает True, если сообщение было удалено.
+    """
+    if not message.from_user:
+        return False
+
+    # Получаем текст из любого типа сообщения
+    text = get_message_text(message)
+    if not text:
+        return False
+
+    chat_id = message.chat.id
+
+    # Проверяем, включена ли фильтрация запрещённых слов для этого чата
+    async with async_session() as session:
+        result = await session.execute(
+            select(Chat).where(Chat.chat_id == chat_id)
+        )
+        chat = result.scalar_one_or_none()
+
+    if not chat or not chat.bad_words_enabled:
+        return False
+
+    # Проверяем текст на запрещённые слова
+    if contains_bad_word(text):
+        with contextlib.suppress(Exception):
+            await bot.delete_message(chat_id, message.message_id)
+        return True
+
+    return False

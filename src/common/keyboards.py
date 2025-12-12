@@ -45,6 +45,12 @@ def get_filters_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton(
+                text="🤬 Запрещённые слова",
+                callback_data="panel:bad_words",
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="➕ Добавить фильтр",
                 callback_data="panel:filter_add",
             )
