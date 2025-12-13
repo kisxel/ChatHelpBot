@@ -1,0 +1,5 @@
+aiogram
+SQLAlchemy
+python-dotenv
+ruff
+aiosqlite
