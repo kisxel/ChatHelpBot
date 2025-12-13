@@ -110,3 +110,12 @@ async def init_db() -> None:
                     "BOOLEAN DEFAULT 1"
                 )
             )
+
+        # Добавляем bad_words_enabled - вкл/выкл фильтра мата
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text(
+                    "ALTER TABLE chats ADD COLUMN bad_words_enabled "
+                    "BOOLEAN DEFAULT 0"
+                )
+            )

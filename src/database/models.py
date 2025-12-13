@@ -59,6 +59,8 @@ class Chat(Base):
     close_chat_on_post: Mapped[bool] = mapped_column(Boolean, default=False)
     # На сколько секунд закрывать чат после поста
     close_chat_duration: Mapped[int] = mapped_column(Integer, default=10)
+    # Включена ли фильтрация запрещённых слов
+    bad_words_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Warn(Base):

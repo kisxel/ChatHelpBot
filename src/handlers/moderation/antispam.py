@@ -11,7 +11,7 @@ from src.common.keyboards import get_unmute_keyboard
 from src.common.permissions import can_bot_restrict, is_user_admin
 from src.database.core import async_session
 from src.database.models import MessageStats
-from src.handlers.moderation.filters import check_user_filters
+from src.handlers.moderation.filters import check_bad_words, check_user_filters
 from src.handlers.moderation.text_commands import cache_user
 from src.handlers.moderation.utils import get_mute_permissions
 from src.utils import format_timedelta
@@ -154,6 +154,10 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
 
     # Обновляем статистику сообщений
     await update_message_stats(chat_id)
+
+    # Проверяем на запрещённые слова (если удалено - не проверяем фильтры)
+    if await check_bad_words(message, bot):
+        return
 
     # Проверяем фильтры пользователя
     await check_user_filters(message, bot)
