@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router, types
 from aiogram.enums import ChatType
@@ -306,7 +306,7 @@ async def execute_mute(
     try:
         permissions = get_mute_permissions()
         if ctx.duration:
-            until_date = datetime.now(UTC) + ctx.duration
+            until_date = datetime.now(timezone.utc) + ctx.duration
             await bot.restrict_chat_member(
                 message.chat.id,
                 ctx.user_id,
@@ -338,7 +338,7 @@ async def execute_ban(
     """Выполняет бан пользователя."""
     try:
         if ctx.duration:
-            until_date = datetime.now(UTC) + ctx.duration
+            until_date = datetime.now(timezone.utc) + ctx.duration
             await bot.ban_chat_member(
                 message.chat.id, ctx.user_id, until_date=until_date
             )

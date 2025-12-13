@@ -2,7 +2,7 @@
 
 import contextlib
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router, types
 from sqlalchemy import select
@@ -41,7 +41,7 @@ def clean_old_messages(chat_id: int, user_id: int) -> None:
     if key not in user_messages:
         return
 
-    cutoff = datetime.now(UTC) - timedelta(seconds=SPAM_TIME_WINDOW)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=SPAM_TIME_WINDOW)
     user_messages[key] = [
         (ts, msg_id) for ts, msg_id in user_messages[key] if ts > cutoff
     ]
@@ -54,7 +54,7 @@ def check_and_get_spam_messages(
     key = (chat_id, user_id)
     clean_old_messages(chat_id, user_id)
 
-    user_messages[key].append((datetime.now(UTC), message_id))
+    user_messages[key].append((datetime.now(timezone.utc), message_id))
 
     if len(user_messages[key]) > SPAM_MAX_MESSAGES:
         return [msg_id for _, msg_id in user_messages[key]]
@@ -64,7 +64,7 @@ def check_and_get_spam_messages(
 
 async def update_message_stats(chat_id: int) -> None:
     """Обновляет статистику сообщений за сегодня."""
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     async with async_session() as session:
         result = await session.execute(
@@ -109,7 +109,7 @@ async def antispam_handler(message: types.Message, bot: Bot) -> None:
     )
     if spam_msg_ids:
         key = (chat_id, user_id)
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         last_mute = recent_spam_mutes.get(key)
 
         # Если мут был недавно - просто удаляем сообщение
