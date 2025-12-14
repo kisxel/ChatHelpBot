@@ -62,7 +62,7 @@ async def cmd_setup(message: types.Message, bot: Bot) -> None:
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "❌ Эта команда работает только в групповых чатах.\n"
-            "Добавьте меня в группу и выполните /setup там."
+            "Добавьте меня в группу и выполните /setup там. (администратор должен быть НЕ АНОНИМЕН)"
         )
         return
 
