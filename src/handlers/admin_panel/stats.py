@@ -1,6 +1,6 @@
 """Статистика чата."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,7 +15,9 @@ router = Router(name="panel_stats")
 
 async def get_chat_stats(chat_id: int) -> dict:
     """Получает статистику чата."""
-    week_ago = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime(
+        "%Y-%m-%d"
+    )
 
     async with async_session() as session:
         result = await session.execute(

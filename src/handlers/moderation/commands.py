@@ -1,6 +1,6 @@
 """Команды модерации: /ban, /mute, /kick, /unban, /unmute."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Router, types
 from aiogram.enums import ChatType
@@ -112,7 +112,7 @@ async def cmd_ban(message: types.Message, bot: Bot) -> None:
 
     try:
         if duration:
-            until_date = datetime.now(UTC) + duration
+            until_date = datetime.now(timezone.utc) + duration
             await bot.ban_chat_member(
                 message.chat.id, user_id, until_date=until_date
             )
@@ -212,7 +212,7 @@ async def cmd_mute(message: types.Message, bot: Bot) -> None:
     try:
         permissions = get_mute_permissions()
         if duration:
-            until_date = datetime.now(UTC) + duration
+            until_date = datetime.now(timezone.utc) + duration
             await bot.restrict_chat_member(
                 message.chat.id,
                 user_id,
