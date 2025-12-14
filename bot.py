@@ -48,11 +48,10 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # Порядок важен! Роутеры обрабатываются в порядке подключения
     dp.include_router(user_router)
     dp.include_router(chat_router)
     dp.include_router(admin_panel_router)
-    dp.include_router(moderation_router)  # Последний - содержит антиспам
+    dp.include_router(moderation_router)
 
     # Устанавливаем меню команд
     await set_bot_commands(bot)

@@ -13,12 +13,11 @@ from src.handlers.moderation.warns import router as warns_router
 
 router = Router(name="moderation")
 
-# Порядок важен! Команды должны обрабатываться раньше антиспама
 router.include_router(commands_router)
 router.include_router(warns_router)
 router.include_router(text_commands_router)
 router.include_router(reports_router)
 router.include_router(callbacks_router)
-router.include_router(antispam_router)  # Антиспам последний!
+router.include_router(antispam_router)
 
 __all__ = ["router"]
